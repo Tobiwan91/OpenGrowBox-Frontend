@@ -74,6 +74,24 @@ const CameraCard = () => {
     });
   };
 
+  // Helper to fire an event for all cameras in the room
+  const fireEventForAllRoomCameras = useCallback(async (eventType, eventData) => {
+    if (!connection || cameras.length === 0) return;
+
+    const promises = cameras.map(camera =>
+      connection.sendMessagePromise({
+        type: 'fire_event',
+        event_type: eventType,
+        event_data: {
+          ...eventData,
+          device_name: camera.entityId,
+        },
+      })
+    );
+
+    await Promise.all(promises);
+  }, [connection, cameras]);
+
   // Initialize default dates for storage management (previous week to next week)
   const now = new Date();
   const previousWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -1202,6 +1220,11 @@ const CameraCard = () => {
             const currentSelectedCamera = selectedCameraRef.current;
             if (isSameCamera(data.camera_entity, currentSelectedCamera)) {
               console.log('All daily photos deleted:', data.deleted_count);
+              // Clear safety timeout
+              if (window._deleteAllDailyTimeout) {
+                clearTimeout(window._deleteAllDailyTimeout);
+                window._deleteAllDailyTimeout = null;
+              }
               setIsDeletingAllDaily(false);
               // Clear all state
               setDailyPhotos([]);
@@ -1303,6 +1326,11 @@ const CameraCard = () => {
             const currentSelectedCamera = selectedCameraRef.current;
             if (isSameCamera(data.camera_entity, currentSelectedCamera)) {
               console.log('All timelapse photos deleted:', data.deleted_count);
+              // Clear safety timeout
+              if (window._deleteAllTimelapseTimeout) {
+                clearTimeout(window._deleteAllTimelapseTimeout);
+                window._deleteAllTimelapseTimeout = null;
+              }
               setIsDeletingAllTimelapse(false);
               setTotalTimelapseCount(0);
               setTimelapsePhotos([]);
@@ -1326,6 +1354,11 @@ const CameraCard = () => {
             const currentSelectedCamera = selectedCameraRef.current;
             if (isSameCamera(data.camera_entity, currentSelectedCamera)) {
               console.log('All timelapse output deleted:', data.deleted_count);
+              // Clear safety timeout
+              if (window._deleteTimelapseOutputTimeout) {
+                clearTimeout(window._deleteTimelapseOutputTimeout);
+                window._deleteTimelapseOutputTimeout = null;
+              }
               setIsDeletingTimelapseOutput(false);
               setTimelapseOutputs([]);
               setTimelapseOutputCounts({ mp4: 0, zip: 0 });
@@ -1459,7 +1492,7 @@ const CameraCard = () => {
         type: 'fire_event',
         event_type: 'opengrowbox_delete_daily_photo',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
           date: currentPhotoDate,
         },
       });
@@ -1478,7 +1511,7 @@ const CameraCard = () => {
         type: 'fire_event',
         event_type: 'opengrowbox_delete_daily_photo',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
           date: photo.date,
         },
       });
@@ -1505,16 +1538,37 @@ const CameraCard = () => {
 
     try {
       setIsDeletingAllDaily(true);
+
+      // Safety timeout - reset state after 30 seconds if no response
+      const safetyTimeout = setTimeout(() => {
+        setIsDeletingAllDaily(false);
+        setModal({
+          show: true,
+          title: 'Operation Timeout',
+          message: 'The delete operation did not complete. Check HA logs for errors and try again.',
+          type: 'error'
+        });
+      }, 30000);
+
+      // Store timeout ID to clear it on success
+      if (window._deleteAllDailyTimeout) {
+        clearTimeout(window._deleteAllDailyTimeout);
+      }
+      window._deleteAllDailyTimeout = safetyTimeout;
+
       await connection.sendMessagePromise({
         type: 'fire_event',
         event_type: 'opengrowbox_delete_all_daily',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
         },
       });
-      console.log('Delete all daily photos event sent');
+      console.log('Delete all daily photos event sent for device:', selectedCamera);
     } catch (err) {
       console.error('Failed to delete all daily photos:', err);
+      if (window._deleteAllDailyTimeout) {
+        clearTimeout(window._deleteAllDailyTimeout);
+      }
       setIsDeletingAllDaily(false);
       setModal({ show: true, title: 'Delete Failed', message: 'Failed to delete all daily photos. Please try again.', type: 'error' });
     }
@@ -1551,7 +1605,7 @@ const CameraCard = () => {
         type: 'fire_event',
         event_type: 'opengrowbox_download_daily_zip',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
           start_date: zipDateRange.startDate || undefined,
           end_date: zipDateRange.endDate || undefined,
         },
@@ -1574,16 +1628,36 @@ const CameraCard = () => {
 
     try {
       setIsDeletingAllTimelapse(true);
+
+      // Safety timeout - reset state after 30 seconds if no response
+      const safetyTimeout = setTimeout(() => {
+        setIsDeletingAllTimelapse(false);
+        setModal({
+          show: true,
+          title: 'Operation Timeout',
+          message: 'The delete operation did not complete. Check HA logs for errors and try again.',
+          type: 'error'
+        });
+      }, 30000);
+
+      if (window._deleteAllTimelapseTimeout) {
+        clearTimeout(window._deleteAllTimelapseTimeout);
+      }
+      window._deleteAllTimelapseTimeout = safetyTimeout;
+
       await connection.sendMessagePromise({
         type: 'fire_event',
         event_type: 'opengrowbox_delete_all_timelapse',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
         },
       });
-      console.log('Delete all timelapse event sent');
+      console.log('Delete all timelapse event sent for device:', selectedCamera);
     } catch (err) {
       console.error('Failed to delete all timelapse photos:', err);
+      if (window._deleteAllTimelapseTimeout) {
+        clearTimeout(window._deleteAllTimelapseTimeout);
+      }
       setIsDeletingAllTimelapse(false);
       setModal({ show: true, title: 'Delete Failed', message: 'Failed to delete all timelapse photos. Please try again.', type: 'error' });
     }
@@ -1599,16 +1673,36 @@ const CameraCard = () => {
 
     try {
       setIsDeletingTimelapseOutput(true);
+
+      // Safety timeout - reset state after 30 seconds if no response
+      const safetyTimeout = setTimeout(() => {
+        setIsDeletingTimelapseOutput(false);
+        setModal({
+          show: true,
+          title: 'Operation Timeout',
+          message: 'The delete operation did not complete. Check HA logs for errors and try again.',
+          type: 'error'
+        });
+      }, 30000);
+
+      if (window._deleteTimelapseOutputTimeout) {
+        clearTimeout(window._deleteTimelapseOutputTimeout);
+      }
+      window._deleteTimelapseOutputTimeout = safetyTimeout;
+
       await connection.sendMessagePromise({
         type: 'fire_event',
         event_type: 'opengrowbox_delete_all_timelapse_output',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
         },
       });
-      console.log('Delete all timelapse output event sent');
+      console.log('Delete all timelapse output event sent for device:', selectedCamera);
     } catch (err) {
       console.error('Failed to delete all timelapse output:', err);
+      if (window._deleteTimelapseOutputTimeout) {
+        clearTimeout(window._deleteTimelapseOutputTimeout);
+      }
       setIsDeletingTimelapseOutput(false);
       setModal({ show: true, title: 'Delete Failed', message: 'Failed to delete all timelapse output files. Please try again.', type: 'error' });
     }
@@ -1643,7 +1737,7 @@ const CameraCard = () => {
         type: 'fire_event',
         event_type: 'opengrowbox_retry_daily_snapshot',
         event_data: {
-          camera_entity: selectedCamera,
+          device_name: selectedCamera,
         },
       });
       console.log('Retry capture event sent for:', selectedCamera);
@@ -1708,15 +1802,11 @@ const CameraCard = () => {
           return;
         }
         
-        const response = await connection.sendMessagePromise({
-          type: 'fire_event',
-          event_type: 'opengrowbox_save_timelapse_config',
-          event_data: {
-            device_name: activeCamera,
-            config: configPayload,
-          },
+        // Fire event for all cameras in the room so they stay in sync
+        await fireEventForAllRoomCameras('opengrowbox_save_timelapse_config', {
+          config: configPayload,
         });
-        console.log('[CameraCard] Timelapse config saved to backend, response:', response);
+        console.log('[CameraCard] Timelapse config saved to backend for all cameras');
       } catch (err) {
         console.error('[CameraCard] Failed to save timelapse config:', err);
       }
@@ -1797,13 +1887,9 @@ const CameraCard = () => {
         // Stop timelapse immediately without confirmation
         // User can restart if needed
         
-        await connection.sendMessagePromise({
-          type: 'fire_event',
-          event_type: 'opengrowbox_stop_timelapse',
-          event_data: {
-            device_name: selectedCamera,
-            room: currentRoom,
-          },
+        // Fire stop event for all cameras in the room
+        await fireEventForAllRoomCameras('opengrowbox_stop_timelapse', {
+          room: currentRoom,
         });
 
         // Clear scheduled state immediately for better UX
@@ -1816,33 +1902,23 @@ const CameraCard = () => {
 
         console.log('Timelapse stop command sent successfully');
       } else {
-        // Start recording: first persist current UI config so backend startTL reads valid ISO dates
-        await connection.sendMessagePromise({
-          type: 'fire_event',
-          event_type: 'opengrowbox_save_timelapse_config',
-          event_data: {
-            device_name: selectedCamera,
-            config: {
-              interval: timelapseConfig.interval,
-              startDate: toUtcISO(timelapseConfig.startDate),
-              endDate: toUtcISO(timelapseConfig.endDate),
-              format: timelapseConfig.format,
-              daily_snapshot_enabled: timelapseConfig.dailySnapshotEnabled,
-              daily_snapshot_time: timelapseConfig.dailySnapshotTime,
-              capture_at_night: timelapseConfig.captureAtNight,
-            },
+        // Start recording: persist config and start for all cameras in the room
+        await fireEventForAllRoomCameras('opengrowbox_save_timelapse_config', {
+          config: {
+            interval: timelapseConfig.interval,
+            startDate: toUtcISO(timelapseConfig.startDate),
+            endDate: toUtcISO(timelapseConfig.endDate),
+            format: timelapseConfig.format,
+            daily_snapshot_enabled: timelapseConfig.dailySnapshotEnabled,
+            daily_snapshot_time: timelapseConfig.dailySnapshotTime,
+            capture_at_night: timelapseConfig.captureAtNight,
           },
         });
 
-        await connection.sendMessagePromise({
-          type: 'fire_event',
-          event_type: 'opengrowbox_start_timelapse',
-          event_data: {
-            device_name: selectedCamera,
-            room: currentRoom,
-          },
+        await fireEventForAllRoomCameras('opengrowbox_start_timelapse', {
+          room: currentRoom,
         });
-        console.log('Timelapse recording started');
+        console.log('Timelapse recording started for all cameras');
       }
     } catch (err) {
       console.error('Failed to toggle recording:', err);
@@ -2113,7 +2189,14 @@ const CameraCard = () => {
           <TimelapseConfigSection>
             {/* Section Header */}
             <TimelapseConfigHeader>
-              <TimelapseConfigTitle>Timelapse Configuration</TimelapseConfigTitle>
+              <TimelapseConfigTitleRow>
+                <TimelapseConfigTitle>Timelapse Configuration</TimelapseConfigTitle>
+                <ConfigInfoIcon title="Recording & Daily Snapshots: Start/stop and all settings apply to ALL cameras in this room simultaneously.
+
+Generation & Storage: Timelapse video generation and storage management (except output) are per individual camera.">
+                  <MdInfo size={16} />
+                </ConfigInfoIcon>
+              </TimelapseConfigTitleRow>
               <TimelapseConfigDescription>
                 Generate a timelapse video from your camera recordings. Select the time range and interval below.
               </TimelapseConfigDescription>
@@ -2833,10 +2916,32 @@ const TimelapseConfigHeader = styled.div`
   margin-bottom: 16px;
 `;
 
+const TimelapseConfigTitleRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+`;
+
 const TimelapseConfigTitle = styled.h3`
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin: 0;
+`;
+
+const ConfigInfoIcon = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--second-text-color);
+  opacity: 0.6;
+  cursor: help;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 1;
+    color: var(--warning-color, #f59e0b);
+  }
 `;
 
 const TimelapseConfigDescription = styled.p`
